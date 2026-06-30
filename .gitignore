@@ -1,0 +1,7 @@
+node_modules/
+.claude/
+bridge/bridge.log
+
+# bridge/config.json holds your real Obsidian API key — keep it out of git.
+# Copy bridge/config.example.json to bridge/config.json and fill in your key.
+bridge/config.json

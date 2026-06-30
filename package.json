@@ -1,0 +1,21 @@
+{
+  "name": "obsideon",
+  "version": "1.0.0",
+  "description": "XENEON EDGE widget + local bridge that shows and manages Obsidian action items.",
+  "private": true,
+  "author": "phaenom",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node bridge/server.js",
+    "bridge": "node bridge/server.js",
+    "mock": "node test/mock-obsidian-server.js --vault test/fixture-vault",
+    "bridge:test": "node bridge/server.js --config test/config.test.json",
+    "preview": "node test/static-server.js",
+    "autostart:install": "node scripts/autostart.js install",
+    "autostart:uninstall": "node scripts/autostart.js uninstall",
+    "autostart:status": "node scripts/autostart.js status"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "_comment": "Copy this file to config.json and fill in your own values.",
+
+  "obsidianBaseUrl": "https://127.0.0.1:27124",
+  "_obsidianBaseUrl": "Base URL of Obsidian's 'Local REST API' plugin. Its HTTPS server defaults to 27124; enable the plain-HTTP localhost server for the simpler 27123 (no self-signed cert).",
+
+  "obsidianApiKey": "PUT-YOUR-API-KEY-HERE",
+  "_obsidianApiKey": "From Obsidian -> Settings -> Local REST API -> API Key.",
+
+  "insecureTls": true,
+  "_insecureTls": "Set true only if obsidianBaseUrl uses https:// (the plugin ships a self-signed cert).",
+
+  "vaultName": "My Vault",
+  "_vaultName": "Exact vault name as shown in Obsidian, used to build obsidian:// deep links.",
+
+  "actionItemsFolder": "Inbox",
+  "actionItemsPrefix": "Action Items",
+  "_actionItems": "The bridge lists actionItemsFolder and uses the newest note whose name starts with actionItemsPrefix (filenames sort by their YYYYMMDD date).",
+
+  "listenPort": 8765,
+  "_listenPort": "Port the bridge listens on. The widget talks to this, not Obsidian directly."
+}

@@ -1,0 +1,13 @@
+{
+    "en": {
+        "translation": {
+            "Action Items": "Action Items",
+            "Refresh now": "Refresh now",
+            "Open note in Obsidian": "Open note in Obsidian",
+            "Close out": "Close out",
+            "All clear — no open action items.": "All clear — no open action items.",
+            "Can't reach the bridge server.": "Can't reach the bridge server.",
+            "Retry": "Retry"
+        }
+    }
+}

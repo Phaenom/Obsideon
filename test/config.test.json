@@ -1,0 +1,9 @@
+{
+  "obsidianBaseUrl": "http://127.0.0.1:27199",
+  "obsidianApiKey": "test-key-123",
+  "insecureTls": false,
+  "vaultName": "TestVault",
+  "actionItemsFolder": "00-Inbox",
+  "actionItemsPrefix": "Action Items",
+  "listenPort": 8765
+}
