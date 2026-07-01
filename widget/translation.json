@@ -7,7 +7,12 @@
             "Close out": "Close out",
             "All clear — no open action items.": "All clear — no open action items.",
             "Can't reach the bridge server.": "Can't reach the bridge server.",
-            "Retry": "Retry"
+            "Retry": "Retry",
+            "Add new section": "Add new section",
+            "Add task": "Add task",
+            "Hide section": "Hide section",
+            "Hidden sections": "Hidden sections",
+            "All sections hidden — restore them from the eye button above.": "All sections hidden — restore them from the eye button above."
         }
     }
 }

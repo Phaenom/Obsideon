@@ -51,13 +51,52 @@ const config = loadConfig();
 let taskCache = {};
 
 // Obsidian Tasks-plugin metadata markers (due date, priorities, recurrence, etc).
-// We strip these from an item's displayed text and pull the due date out separately.
+// We split these off an item's displayed text and pull the due date out separately.
 const DUE_EMOJI = '📅';
-const TASK_EMOJI = ['📅', '⏫', '🔺', '🔼', '🔽', '⏬', '🛫', '➕', '✅', '🔁', '⏳', '❌', '🚫', '🆔'];
-const TASK_EMOJI_RE = new RegExp('\\s*(' + TASK_EMOJI.map(escapeRegex).join('|') + ').*$');
+const DATE_EMOJI = ['📅', '🛫', '➕', '✅', '⏳', '❌'];   // each must be followed by YYYY-MM-DD
+const PRIORITY_EMOJI_LIST = ['🔺', '⏫', '🔼', '🔽', '⏬']; // standalone markers
+const FREETEXT_EMOJI = ['🔁', '🆔', '🚫'];                 // value is free text (e.g. "every week")
+const TASK_EMOJI = DATE_EMOJI.concat(PRIORITY_EMOJI_LIST, FREETEXT_EMOJI);
 const DUE_RE = new RegExp(escapeRegex(DUE_EMOJI) + '\\s*(\\d{4}-\\d{2}-\\d{2})');
+const PRIORITY_BY_EMOJI = { '🔺': 'highest', '⏫': 'high', '🔼': 'medium', '🔽': 'low', '⏬': 'lowest' };
+const EMOJI_BY_PRIORITY = { highest: '🔺', high: '⏫', medium: '🔼', low: '🔽', lowest: '⏬' };
 
 function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+// Split a task's raw text into { display, meta } where meta is the trailing run of
+// Tasks-plugin markers. Rather than cutting at the first emoji anywhere in the line
+// (which truncates task text that merely contains an emoji, and made edits write the
+// truncated text back), a candidate tail only counts as metadata if every emoji
+// segment in it is well-formed: date markers followed by a date, priority markers
+// standalone, recurrence/id free-form.
+function splitTaskMeta(raw) {
+  const positions = [];
+  for (const e of TASK_EMOJI) {
+    let idx = raw.indexOf(e);
+    while (idx !== -1) { positions.push({ idx, e }); idx = raw.indexOf(e, idx + e.length); }
+  }
+  positions.sort((a, b) => a.idx - b.idx);
+
+  for (let s = 0; s < positions.length; s++) {
+    const segs = positions.slice(s);
+    let valid = true;
+    for (let k = 0; k < segs.length; k++) {
+      const start = segs[k].idx + segs[k].e.length;
+      const end = k + 1 < segs.length ? segs[k + 1].idx : raw.length;
+      const content = raw.slice(start, end).trim();
+      if (DATE_EMOJI.includes(segs[k].e)) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(content)) { valid = false; break; }
+      } else if (PRIORITY_EMOJI_LIST.includes(segs[k].e)) {
+        if (content !== '') { valid = false; break; }
+      }
+      // FREETEXT_EMOJI: any content is fine
+    }
+    if (valid) {
+      return { display: raw.slice(0, positions[s].idx).trim(), meta: raw.slice(positions[s].idx).trim() };
+    }
+  }
+  return { display: raw.trim(), meta: '' };
+}
 
 // ---------------------------------------------------------------------------
 // Obsidian REST API client
@@ -186,17 +225,18 @@ async function parseNote(file) {
       if (level > 4) level = 4;
 
       const raw = cb[3];
+      const split = splitTaskMeta(raw);
+
       let due = null;
-      const dm = raw.match(DUE_RE);
+      const dm = split.meta.match(DUE_RE);
       if (dm) due = dm[1];
 
-      const PRIORITY_EMOJI_MAP = { '🔺': 'highest', '⏫': 'high', '🔼': 'medium', '🔽': 'low', '⏬': 'lowest' };
       let priority = null;
-      for (const [emoji, level_] of Object.entries(PRIORITY_EMOJI_MAP)) {
-        if (raw.includes(emoji)) { priority = level_; break; }
+      for (const [emoji, level_] of Object.entries(PRIORITY_BY_EMOJI)) {
+        if (split.meta.includes(emoji)) { priority = level_; break; }
       }
 
-      let display = raw.replace(TASK_EMOJI_RE, '').replace(/\s{2,}/g, ' ').trim();
+      let display = split.display.replace(/\s{2,}/g, ' ').trim();
       if (!display) display = raw.trim();
 
       const id = stableId(file, i, line);
@@ -239,9 +279,8 @@ async function addTaskToNote(section, text, due, priority) {
     if (lines[i].trim() !== '') insertAfter = i;
   }
 
-  const PRIORITY_EMOJI = { highest: '🔺', high: '⏫', medium: '🔼', low: '🔽', lowest: '⏬' };
   let taskLine = `- [ ] ${text}`;
-  if (priority && PRIORITY_EMOJI[priority]) taskLine += ` ${PRIORITY_EMOJI[priority]}`;
+  if (priority && EMOJI_BY_PRIORITY[priority]) taskLine += ` ${EMOJI_BY_PRIORITY[priority]}`;
   if (due) taskLine += ` 📅 ${due}`;
 
   lines.splice(insertAfter + 1, 0, taskLine);
@@ -272,10 +311,17 @@ async function updateTask(id, text, due, priority) {
   const prefix = lines[entry.lineIndex].match(/^([\t ]*- \[[ xX]\] )/);
   if (!prefix) throw new Error('Could not parse task line.');
 
-  const PRIORITY_EMOJI = { highest: '🔺', high: '⏫', medium: '🔼', low: '🔽', lowest: '⏬' };
+  // Keep metadata this widget doesn't manage (recurrence 🔁, start 🛫, created ➕,
+  // id 🆔, ...) — only due date and priority are replaced by the edit.
+  const rawOld = lines[entry.lineIndex].slice(prefix[1].length);
+  let keep = splitTaskMeta(rawOld).meta.replace(DUE_RE, '');
+  for (const e of PRIORITY_EMOJI_LIST) keep = keep.split(e).join('');
+  keep = keep.replace(/\s{2,}/g, ' ').trim();
+
   let newLine = prefix[1] + text;
-  if (priority && PRIORITY_EMOJI[priority]) newLine += ` ${PRIORITY_EMOJI[priority]}`;
+  if (priority && EMOJI_BY_PRIORITY[priority]) newLine += ` ${EMOJI_BY_PRIORITY[priority]}`;
   if (due) newLine += ` 📅 ${due}`;
+  if (keep) newLine += ` ${keep}`;
 
   lines[entry.lineIndex] = newLine;
   await setVaultFileContent(entry.file, lines.join(eol));
@@ -308,6 +354,20 @@ async function setTaskDone(id, done) {
 // ---------------------------------------------------------------------------
 // HTTP server (widget-facing)
 // ---------------------------------------------------------------------------
+// Same-machine callers only. The iCUE webview sends no Origin (or "null"); the dev
+// preview runs on localhost. Anything else — e.g. a malicious webpage fetching
+// 127.0.0.1, or a DNS-rebinding host — gets refused before any handler runs.
+function requestAllowed(req) {
+  const host = String(req.headers.host || '').replace(/:\d+$/, '');
+  if (host && host !== '127.0.0.1' && host !== 'localhost') return false;
+  const origin = req.headers.origin;
+  if (!origin || origin === 'null' || origin === 'file://') return true;
+  try {
+    const u = new URL(origin);
+    return u.hostname === '127.0.0.1' || u.hostname === 'localhost';
+  } catch (_) { return false; }
+}
+
 function sendJson(res, status, body) {
   const json = JSON.stringify(body);
   res.writeHead(status, {
@@ -329,6 +389,12 @@ function readBody(req) {
 
 const server = http.createServer(async (req, res) => {
   try {
+    if (!requestAllowed(req)) {
+      // Deliberately no CORS headers: the browser must not expose this response.
+      res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ error: 'Forbidden: same-machine callers only' }));
+    }
+
     const url = new URL(req.url, `http://${req.headers.host}`);
     const route = `${req.method} ${url.pathname}`;
 

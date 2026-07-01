@@ -1,14 +1,31 @@
-// Zoom the fixed 2560×720 layout to fit the actual viewport.
+// Scale the 2560×720 design to the actual viewport and fill it edge to edge.
 // Uses CSS zoom rather than transform:scale to avoid compositing blur.
 // Snaps to 1.0 when within 1% of native to prevent fractional-pixel blurriness.
+// The root is then sized explicitly in pre-zoom pixels: vw/vh units no longer
+// line up with the real viewport once zoom is applied, which otherwise leaves
+// an unused strip on the right/bottom whenever the panel viewport isn't exactly
+// 2560×720 (e.g. iCUE's padding around the widget).
 (function fitToViewport() {
     function apply() {
         var z = Math.min(window.innerWidth / 2560, window.innerHeight / 720);
         if (z > 0.99 && z <= 1.0) z = 1.0;
-        document.documentElement.style.zoom = z;
+        var root = document.documentElement.style;
+        root.zoom = z;
+        root.width = (window.innerWidth / z) + 'px';
+        root.height = (window.innerHeight / z) + 'px';
     }
-    window.addEventListener('resize', apply);
-    apply();
+    // Poll alongside the resize event: embedded webviews (like iCUE's) may size
+    // the window after load without dispatching resize.
+    var lastW = 0, lastH = 0;
+    function applyIfChanged() {
+        if (window.innerWidth === lastW && window.innerHeight === lastH) return;
+        lastW = window.innerWidth;
+        lastH = window.innerHeight;
+        apply();
+    }
+    window.addEventListener('resize', applyIfChanged);
+    setInterval(applyIfChanged, 500);
+    applyIfChanged();
 })();
 
 (() => {
@@ -66,6 +83,14 @@
     }
     const collapsedSections = loadCollapsed();
 
+    // Open items in collapsed sections aren't in the DOM, so recount() adds this in.
+    function hiddenOpenCount() {
+        if (!lastData || !lastData.sections) return 0;
+        return lastData.sections.reduce(function(sum, s) {
+            return collapsedSections.has(s.name) ? sum + s.items.length : sum;
+        }, 0);
+    }
+
     function hideSection(name) {
         collapsedSections.add(name);
         saveCollapsed();
@@ -91,6 +116,7 @@
             closeHiddenMenu();
         }
     });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeHiddenMenu(); });
 
     function renderHiddenMenu(hiddenSections) {
         hiddenGroupsMenu.innerHTML = '';
@@ -207,15 +233,15 @@
 
     // ---- item & card rendering ----------------------------------------------
     // Nested items don't get visually indented (sorting by due date/priority
-    // can separate a child from its parent), so their full ancestor chain is
-    // concatenated into the label instead, e.g. "Landing Gear - Installed".
+    // can separate a child from its parent), so their ancestor chain becomes a
+    // muted prefix on the label instead, e.g. "Landing Gear - " + "Installed".
     function withAncestorPaths(items) {
         const stack = [];
         return items.map(function(item) {
             while (stack.length && stack[stack.length - 1].level >= item.level) stack.pop();
-            const path = stack.map(function(a) { return a.text; }).concat([item.text]);
+            const prefix = stack.map(function(a) { return a.text; }).join(' - ');
             stack.push({ level: item.level, text: item.text });
-            return Object.assign({}, item, { pathText: path.join(' - ') });
+            return Object.assign({}, item, { pathPrefix: prefix ? prefix + ' - ' : '' });
         });
     }
 
@@ -223,7 +249,16 @@
         const node = itemTemplate.content.firstElementChild.cloneNode(true);
         if (item.priority) node.classList.add(`pri-${item.priority}`);
         node.dataset.id = item.id;
-        node.querySelector('.item-text').textContent = item.pathText || item.text;
+        const textEl = node.querySelector('.item-text');
+        if (item.pathPrefix) {
+            const prefixEl = document.createElement('span');
+            prefixEl.className = 'path-prefix';
+            prefixEl.textContent = item.pathPrefix;
+            textEl.appendChild(prefixEl);
+            textEl.appendChild(document.createTextNode(item.text));
+        } else {
+            textEl.textContent = item.text;
+        }
 
         const pill = node.querySelector('.due-pill');
         if (item.due) {
@@ -268,6 +303,17 @@
         openNoteBtn.style.opacity = activeNoteUri ? '1' : '0.3';
 
         var sections = data.sections || [];
+
+        // Drop collapsed names that no longer exist in the note (e.g. a new weekly
+        // note without them) so localStorage doesn't accumulate dead entries.
+        // Only reached on a successful fetch, so transient errors never wipe state.
+        var sectionNames = new Set(sections.map(function(s) { return s.name; }));
+        var pruned = false;
+        collapsedSections.forEach(function(name) {
+            if (!sectionNames.has(name)) { collapsedSections.delete(name); pruned = true; }
+        });
+        if (pruned) saveCollapsed();
+
         var visibleSections = sections.filter(function(s) { return !collapsedSections.has(s.name); });
         var hiddenSections = sections.filter(function(s) { return collapsedSections.has(s.name); });
         renderHiddenMenu(hiddenSections);
@@ -275,6 +321,12 @@
         if (sections.length === 0) { setPanel('empty'); return; }
         setPanel('rail');
         for (var i = 0; i < visibleSections.length; i++) rail.appendChild(buildCard(visibleSections[i]));
+        if (visibleSections.length === 0) {
+            var hint = document.createElement('div');
+            hint.className = 'all-hidden-hint';
+            hint.textContent = 'All sections hidden — restore them from the eye button above.';
+            rail.appendChild(hint);
+        }
 
         // Restore scroll positions
         rail.scrollLeft = savedRailScroll;
@@ -294,6 +346,7 @@
             card.querySelector('.section-count').textContent = String(open);
             total += open;
         }
+        total += hiddenOpenCount();
         countBadge.textContent = String(total);
         if (total === 0 && rail.querySelectorAll('.card').length === 0) setPanel('empty');
     }
@@ -365,7 +418,11 @@
         updatedAt.textContent = new Date().toLocaleTimeString([], { hour12: false });
     }
 
+    let refreshInFlight = false;
+
     async function refresh() {
+        if (refreshInFlight) return; // a slow fetch must not stack polls behind it
+        refreshInFlight = true;
         refreshBtn.classList.add('spinning');
         try {
             const res = await fetch(`${API_BASE}/api/tasks`);
@@ -381,6 +438,7 @@
             setPanel('error');
             console.error('Failed to load action items', err);
         } finally {
+            refreshInFlight = false;
             refreshBtn.classList.remove('spinning');
         }
     }

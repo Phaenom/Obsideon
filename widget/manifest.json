@@ -3,7 +3,7 @@
     "id": "com.phaenom.obsideon",
     "name": "Obsideon",
     "description": "View, close out, and manage your Obsidian action items right on XENEON EDGE.",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "preview_icon": "icon.png",
     "min_framework_version": "1.0.0",
     "min_app_version": "5.44",

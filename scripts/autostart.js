@@ -56,10 +56,14 @@ function winVbsPath() {
 
 function winVbsContent() {
   // WScript.Shell.Run with window style 0 = hidden; False = don't wait.
-  // Double-quote escaping inside a VBScript string uses doubled double-quotes.
+  // Launched through cmd so stdout/stderr land in bridge/bridge.log (Run itself
+  // cannot redirect) — otherwise a startup failure like a busy port dies silently.
+  // Double-quote escaping inside a VBScript string uses doubled double-quotes; the
+  // extra outer quotes make cmd /c treat the redirection string as one command.
   const node = NODE.replace(/"/g, '""');
   const server = SERVER.replace(/"/g, '""');
-  return `Set oShell = CreateObject("WScript.Shell")\r\noShell.Run """${node}"" ""${server}""", 0, False\r\n`;
+  const log = path.join(REPO, 'bridge', 'bridge.log').replace(/"/g, '""');
+  return `Set oShell = CreateObject("WScript.Shell")\r\noShell.Run "cmd.exe /c """"${node}"" ""${server}"" >> ""${log}"" 2>&1""", 0, False\r\n`;
 }
 
 function winInstall() {
