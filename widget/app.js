@@ -28,6 +28,9 @@
     const addSectionBtn = document.getElementById('add-section-btn');
     const sectionTemplate = document.getElementById('section-template');
     const itemTemplate = document.getElementById('item-template');
+    const hiddenGroupsBtn = document.getElementById('hidden-groups-btn');
+    const hiddenGroupsCount = document.getElementById('hidden-groups-count');
+    const hiddenGroupsMenu = document.getElementById('hidden-groups-menu');
 
     // Section modal
     const sectionModal = document.getElementById('section-modal');
@@ -50,6 +53,60 @@
     let taskModalSectionName = null;
     let taskEditId = null;
     let taskSelectedPriority = 'normal';
+    let lastData = null;
+
+    // ---- collapsed (hidden) sections ----------------------------------------
+    const COLLAPSED_KEY = 'obsideon.collapsedSections';
+    function loadCollapsed() {
+        try { return new Set(JSON.parse(localStorage.getItem(COLLAPSED_KEY)) || []); }
+        catch (e) { return new Set(); }
+    }
+    function saveCollapsed() {
+        localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsedSections]));
+    }
+    const collapsedSections = loadCollapsed();
+
+    function hideSection(name) {
+        collapsedSections.add(name);
+        saveCollapsed();
+        if (lastData) renderSections(lastData);
+    }
+
+    function showSection(name) {
+        collapsedSections.delete(name);
+        saveCollapsed();
+        if (lastData) renderSections(lastData);
+    }
+
+    function closeHiddenMenu() {
+        hiddenGroupsMenu.classList.add('hidden');
+    }
+
+    hiddenGroupsBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        hiddenGroupsMenu.classList.toggle('hidden');
+    });
+    document.addEventListener('click', (e) => {
+        if (!hiddenGroupsMenu.classList.contains('hidden') && !hiddenGroupsMenu.contains(e.target) && e.target !== hiddenGroupsBtn) {
+            closeHiddenMenu();
+        }
+    });
+
+    function renderHiddenMenu(hiddenSections) {
+        hiddenGroupsMenu.innerHTML = '';
+        for (const section of hiddenSections) {
+            const item = document.createElement('button');
+            item.className = 'dropdown-item';
+            item.innerHTML = `<span class="dropdown-item-name"></span><span class="dropdown-item-count"></span>`;
+            item.querySelector('.dropdown-item-name').textContent = section.name;
+            item.querySelector('.dropdown-item-count').textContent = String(section.items.length);
+            item.addEventListener('click', () => { showSection(section.name); closeHiddenMenu(); });
+            hiddenGroupsMenu.appendChild(item);
+        }
+        hiddenGroupsCount.textContent = String(hiddenSections.length);
+        hiddenGroupsBtn.classList.toggle('hidden', hiddenSections.length === 0);
+        if (hiddenSections.length === 0) closeHiddenMenu();
+    }
 
     // ---- priority picker wiring (task modal) --------------------------------
     taskPriorityBtns.forEach(btn => {
@@ -149,12 +206,24 @@
     }
 
     // ---- item & card rendering ----------------------------------------------
+    // Nested items don't get visually indented (sorting by due date/priority
+    // can separate a child from its parent), so their full ancestor chain is
+    // concatenated into the label instead, e.g. "Landing Gear - Installed".
+    function withAncestorPaths(items) {
+        const stack = [];
+        return items.map(function(item) {
+            while (stack.length && stack[stack.length - 1].level >= item.level) stack.pop();
+            const path = stack.map(function(a) { return a.text; }).concat([item.text]);
+            stack.push({ level: item.level, text: item.text });
+            return Object.assign({}, item, { pathText: path.join(' - ') });
+        });
+    }
+
     function buildItem(item) {
         const node = itemTemplate.content.firstElementChild.cloneNode(true);
-        node.classList.add(`lvl-${item.level || 0}`);
         if (item.priority) node.classList.add(`pri-${item.priority}`);
         node.dataset.id = item.id;
-        node.querySelector('.item-text').textContent = item.text;
+        node.querySelector('.item-text').textContent = item.pathText || item.text;
 
         const pill = node.querySelector('.due-pill');
         if (item.due) {
@@ -175,9 +244,10 @@
         card.querySelector('.section-name').textContent = section.name;
         card.querySelector('.section-count').textContent = String(section.items.length);
         const list = card.querySelector('.item-list');
-        for (const item of sortItems(section.items)) list.appendChild(buildItem(item));
+        for (const item of sortItems(withAncestorPaths(section.items))) list.appendChild(buildItem(item));
 
         card.querySelector('.add-task-btn').addEventListener('click', () => openTaskModal(section.name));
+        card.querySelector('.collapse-btn').addEventListener('click', () => hideSection(section.name));
         return card;
     }
 
@@ -198,9 +268,13 @@
         openNoteBtn.style.opacity = activeNoteUri ? '1' : '0.3';
 
         var sections = data.sections || [];
+        var visibleSections = sections.filter(function(s) { return !collapsedSections.has(s.name); });
+        var hiddenSections = sections.filter(function(s) { return collapsedSections.has(s.name); });
+        renderHiddenMenu(hiddenSections);
+
         if (sections.length === 0) { setPanel('empty'); return; }
         setPanel('rail');
-        for (var i = 0; i < sections.length; i++) rail.appendChild(buildCard(sections[i]));
+        for (var i = 0; i < visibleSections.length; i++) rail.appendChild(buildCard(visibleSections[i]));
 
         // Restore scroll positions
         rail.scrollLeft = savedRailScroll;
@@ -297,6 +371,7 @@
             const res = await fetch(`${API_BASE}/api/tasks`);
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+            lastData = data;
             renderSections(data);
             stampUpdated();
         } catch (err) {

@@ -23,6 +23,17 @@
         <div class="bar-right">
             <span id="updated-at" class="updated">--:--:--</span>
             <button id="add-section-btn" class="text-btn" title="Add new section" aria-label="Add new section">+ Section</button>
+            <div class="hidden-groups-wrap">
+                <button id="hidden-groups-btn" class="icon-btn hidden" title="Hidden sections" aria-label="Hidden sections">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/>
+                        <path d="M3 3l18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <span id="hidden-groups-count" class="hidden-count-badge">0</span>
+                </button>
+                <div id="hidden-groups-menu" class="dropdown-menu hidden"></div>
+            </div>
             <button id="open-note-btn" class="icon-btn" title="Open note in Obsidian" aria-label="Open note in Obsidian">
                 <svg viewBox="0 0 24 24" width="20" height="20" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <path d="M14 3h7v7M21 3l-9 9M10 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -60,6 +71,11 @@
                     <button class="add-task-btn" title="Add task" aria-label="Add task">
                         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+                        </svg>
+                    </button>
+                    <button class="collapse-btn" title="Hide section" aria-label="Hide section">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
                         </svg>
                     </button>
                 </div>
