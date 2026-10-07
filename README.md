@@ -171,16 +171,19 @@ icuewidget validate widget
 icuewidget package widget --output dist/Obsideon.icuewidget
 ```
 
-#### Alternative: iFrame widget (if the imported package shows "Can't reach the bridge server")
+#### Approve the widget's network permission (iCUE 5.52+)
 
-Some iCUE versions (seen on 5.52) block the packaged `file://` widget from calling `http://127.0.0.1` — its network permission stays "pending" and every fetch fails before reaching the bridge. The bridge also serves the widget itself, so you can embed it as an iFrame widget instead. The page and API then share one origin and nothing is blocked:
+Newer iCUE versions require each widget's network access to be approved. Until you approve it, the widget shows **"Can't reach the bridge server"** even though the bridge is running, and the bridge never sees a request (iCUE's log shows `Failed to fetch`). Select the Obsideon widget in the XENEON EDGE layout, open its settings, and approve the request to reach `localhost:<listenPort>` (default `8765`). iCUE records this in `%APPDATA%CorsairCUE5widgetsWidgetPermissionData` — a state of `pending` means it still needs approval.
 
-1. Start the bridge.
-2. In iCUE, add an **iFrame** widget to the XENEON EDGE and paste this embed code (use your `listenPort`). A bare URL does not work — iCUE renders it as plain text:
+#### Fallback: iFrame widget
+
+If you can't use the packaged widget, the bridge also serves it at `http://127.0.0.1:8765/`, so you can add an **iFrame** widget in iCUE and paste this embed code (use your `listenPort`). A bare URL does not work — iCUE renders it as plain text:
 
 ```html
 <iframe src="http://127.0.0.1:8765/" style="border:0;width:100%;height:100%"></iframe>
 ```
+
+Caveat: iCUE gives iFrame widgets no physical-keyboard input and no on-screen keyboard, so text fields can't be typed into. The packaged widget doesn't have this limitation.
 
 ---
 
