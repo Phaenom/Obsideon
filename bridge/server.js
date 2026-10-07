@@ -387,9 +387,36 @@ function readBody(req) {
   });
 }
 
+// Serves ../widget over the bridge's own origin so the widget can be embedded in iCUE
+// as an iFrame widget (http://127.0.0.1:<port>/). Same-origin calls to /api/* avoid the
+// cross-origin / local-network checks that block the packaged file:// widget.
+const WIDGET_DIR = path.resolve(__dirname, '..', 'widget');
+const MIME = {
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+};
+
+function serveWidgetFile(pathname, res) {
+  let rel;
+  try { rel = decodeURIComponent(pathname); } catch (_) { rel = null; }
+  if (rel === null || rel.includes('\0')) return sendJson(res, 400, { error: 'Bad path' });
+  if (rel === '/') rel = '/index.html';
+  const file = path.resolve(WIDGET_DIR, '.' + rel);
+  const type = MIME[path.extname(file).toLowerCase()];
+  // Must stay inside widget/ and be a known static type (blocks ../ traversal).
+  if (!file.startsWith(WIDGET_DIR + path.sep) || !type) return sendJson(res, 404, { error: 'Not found' });
+  fs.readFile(file, (err, data) => {
+    if (err) return sendJson(res, 404, { error: 'Not found' });
+    res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-cache' });
+    res.end(data);
+  });
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     if (!requestAllowed(req)) {
+      console.warn(`Rejected ${req.method} ${req.url} (Origin: ${req.headers.origin || '(none)'}, Host: ${req.headers.host || '(none)'})`);
       // Deliberately no CORS headers: the browser must not expose this response.
       res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
       return res.end(JSON.stringify({ error: 'Forbidden: same-machine callers only' }));
@@ -463,6 +490,10 @@ const server = http.createServer(async (req, res) => {
       } catch (e) {
         return sendJson(res, 400, { error: e.message });
       }
+    }
+
+    if (req.method === 'GET' && !url.pathname.startsWith('/api/')) {
+      return serveWidgetFile(url.pathname, res);
     }
 
     return sendJson(res, 404, { error: 'Not found' });

@@ -171,6 +171,17 @@ icuewidget validate widget
 icuewidget package widget --output dist/Obsideon.icuewidget
 ```
 
+#### Alternative: iFrame widget (if the imported package shows "Can't reach the bridge server")
+
+Some iCUE versions (seen on 5.52) block the packaged `file://` widget from calling `http://127.0.0.1` — its network permission stays "pending" and every fetch fails before reaching the bridge. The bridge also serves the widget itself, so you can embed it as an iFrame widget instead. The page and API then share one origin and nothing is blocked:
+
+1. Start the bridge.
+2. In iCUE, add an **iFrame** widget to the XENEON EDGE and paste this embed code (use your `listenPort`). A bare URL does not work — iCUE renders it as plain text:
+
+```html
+<iframe src="http://127.0.0.1:8765/" style="border:0;width:100%;height:100%"></iframe>
+```
+
 ---
 
 ## Widget features
