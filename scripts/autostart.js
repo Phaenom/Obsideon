@@ -12,7 +12,7 @@
  *   node scripts/autostart.js status      # is it registered / responding?
  *
  * Mechanism per OS:
- *   Windows  -> Scheduled Task (schtasks), trigger "at log on", runs hidden
+ *   Windows  -> Startup-folder VBS, runs hidden via scripts/supervise.js (restarts on exit)
  *   macOS    -> LaunchAgent plist in ~/Library/LaunchAgents (RunAtLoad + KeepAlive)
  *   Linux    -> systemd --user service (enable --now, Restart=on-failure)
  */
@@ -26,7 +26,8 @@ const { spawnSync, spawn } = require('child_process');
 
 const REPO = path.resolve(__dirname, '..');
 const SERVER = path.join(REPO, 'bridge', 'server.js');
-const NODE = process.execPath;            // the node binary running this script
+const SUPERVISOR = path.join(REPO, 'scripts', 'supervise.js'); // Windows: restarts the bridge if it exits
+const NODE = process.execPath;           // the node binary running this script
 const LABEL = 'com.obsidian.actionitems.bridge';
 const TASK_NAME = 'Obsidian Action Items Bridge';
 const LISTEN_PORT = readListenPort();
@@ -61,7 +62,7 @@ function winVbsContent() {
   // Double-quote escaping inside a VBScript string uses doubled double-quotes; the
   // extra outer quotes make cmd /c treat the redirection string as one command.
   const node = NODE.replace(/"/g, '""');
-  const server = SERVER.replace(/"/g, '""');
+  const server = SUPERVISOR.replace(/"/g, '""');
   const log = path.join(REPO, 'bridge', 'bridge.log').replace(/"/g, '""');
   return `Set oShell = CreateObject("WScript.Shell")\r\noShell.Run "cmd.exe /c """"${node}"" ""${server}"" >> ""${log}"" 2>&1""", 0, False\r\n`;
 }
