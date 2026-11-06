@@ -35,23 +35,28 @@ Inbox/
   Action Items - 20260108.md   ← newest, this is what the widget shows
 ```
 
-Inside that note, organize tasks under `## Section` headings using standard Obsidian checkboxes:
+Inside that note, `## Group` headings become cards on the rail and `### Subgroup` headings become collapsible sections inside them. Under each action, nested checkboxes are **sub-actions** (checkable on their own) and plain bullets are **notes**:
 
 ```markdown
 ## Work
 
+### This week
+
 - [ ] Write Q1 report 📅 2026-01-10 ⏫
+    - Pull the numbers from the dashboard      ← note
+    - [ ] Get sign-off from finance            ← sub-action
 - [ ] Review pull requests
-    - [ ] Auth service PR
-    - [ ] Dashboard PR
+
+### Closed
+
+- [x] Ship v2                                  ← done — hidden; empty subgroups are hidden too
 
 ## Personal
 
 - [ ] Book dentist appointment
-- [x] Buy groceries           ← already checked — hidden from the widget
 ```
 
-**Nesting** (up to 4 levels) is shown with visual indentation. **Completed items** (`- [x]`) are never surfaced. The widget understands [Obsidian Tasks](https://publish.obsidian.md/tasks) plugin emoji metadata:
+Parent actions start collapsed with a summary like "1 sub-action · 1 note"; tap the chevron (or the summary) to expand. **Completed items** (`- [x]`) are never surfaced, along with their notes. Basic inline markdown (`**bold**`, `` `code` ``, `[[wikilinks]]`, `[links](…)`) is rendered. The widget understands [Obsidian Tasks](https://publish.obsidian.md/tasks) plugin emoji metadata:
 
 | Emoji | Meaning |
 |---|---|
@@ -62,7 +67,7 @@ Inside that note, organize tasks under `## Section` headings using standard Obsi
 | `🔽` | Low priority |
 | `⏬` | Lowest priority |
 
-Priority appears as a colored left border on the task. Tasks within each section sort by due date (overdue first, then soonest, then undated), with priority as a tiebreaker.
+Priority appears as a colored left border on the task. Top-level actions within each group or subgroup sort by due date (overdue first, then soonest, then undated), with priority as a tiebreaker; sub-actions and notes keep the note's order under their parent.
 
 ---
 
@@ -193,7 +198,10 @@ Caveat: iCUE gives iFrame widgets no physical-keyboard input and no on-screen ke
 |---|---|
 | **Check off a task** | Tap the green checkmark — marks it done in the note and removes it from the list |
 | **Edit a task** | Tap the task text — opens a modal to update the text, due date, and priority |
-| **Add a task** | Tap **+** in any section card header |
+| **Expand / collapse** | Tap the chevron on a parent action, or a subgroup header; the double-chevron in the top bar expands or collapses every action. State is remembered. |
+| **Add a task** | Tap **+** in a card header (adds to the group) or a subgroup header |
+| **Add a sub-action** | Tap a task's text, then **+ Sub-action** in the edit modal |
+| **Close a parent** | Checking off a parent action also checks off its open sub-actions |
 | **Add a section** | Tap **+ Section** in the top bar |
 | **Open note in Obsidian** | Tap the external link icon in the top bar |
 | **Refresh** | Tap the refresh icon, or wait — the widget polls every 15 seconds |
@@ -203,9 +211,10 @@ Caveat: iCUE gives iFrame widgets no physical-keyboard input and no on-screen ke
 ## How it works
 
 - `bridge/server.js` lists `actionItemsFolder` via the Local REST API, picks the newest file whose name starts with `actionItemsPrefix` (filenames sort by their `YYYYMMDD` date suffix), and parses it.
-- Parsing splits the note by `## headings` into sections and pulls each open `- [ ]` line, preserving indentation as a nesting level (up to 4) and extracting due dates and priority emoji. Already-checked items are omitted.
+- Parsing splits the note into groups (`##`) and subgroups (`###`–`######`), and builds each open `- [ ]` line into a tree from its indentation: nested checkboxes are sub-actions, plain bullets are notes. Due dates and priority emoji are extracted. Checked items and their notes are omitted; an open sub-action under a checked parent is kept and attached to the nearest open ancestor.
 - Each item gets a stable ID from `sha256(file + line-index + line-text)`. The line index is included so two byte-identical lines stay distinct.
-- `GET /api/tasks` returns `{ note, title, obsidianUri, openCount, sections[] }`.
+- `GET /api/tasks` returns `{ note, title, obsidianUri, openCount, groups[], sections[] }`. `groups[]` is the tree (`{ name, items[], subgroups[{ name, items[] }] }`, items `{ type: 'task'|'note', text, children[], … }`); `sections[]` is the old flat list, kept for older widget builds.
+- `POST /api/tasks/add` takes `{ text, group, section? }` for a new action or `{ text, parentId }` for a sub-action.
 - `POST /api/tasks/toggle` re-reads the note, flips that one line **by index** (never a global text replace — duplicate lines elsewhere in the note must not be affected), and writes it back.
 - The bridge adds permissive CORS headers so the widget's sandboxed webview can reach it; the Local REST API plugin doesn't add them itself.
 - The widget polls every 15 seconds and restores scroll position across refreshes so the UI doesn't jump while you're reading.
@@ -214,7 +223,7 @@ Caveat: iCUE gives iFrame widgets no physical-keyboard input and no on-screen ke
 
 ## Testing without real hardware
 
-`test/mock-obsidian-server.js` is a minimal stand-in for the Local REST API plugin, backed by a synthetic vault at `test/fixture-vault/` (two Action Items notes exercising newest-note selection, nesting, due dates, an overdue item, a `— DELETE` heading, a hidden completed item, and duplicate lines). It never touches your real vault.
+`test/mock-obsidian-server.js` is a minimal stand-in for the Local REST API plugin, backed by a synthetic vault at `test/fixture-vault/` (two Action Items notes exercising newest-note selection, nesting, due dates, an overdue item, a `— DELETE` heading, a hidden completed item, duplicate lines, `###` subgroups, notes, and an empty group). It never touches your real vault.
 
 ```bash
 # Terminal 1 — fake Obsidian

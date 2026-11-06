@@ -177,18 +177,66 @@ async function findActiveNote() {
 // ---------------------------------------------------------------------------
 // Note parsing
 // ---------------------------------------------------------------------------
+const HEADING_RE = /^(#{1,6})\s+(.+)$/;
+const CHECKBOX_RE = /^([\t ]*)[-*+] \[([ xX])\]\s+(.*)$/;
+const BULLET_RE = /^([\t ]*)(?:[-*+]|\d+[.)])\s+(.*)$/;
+const RULE_RE = /^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/;
+
+function headingName(text) {
+  return text.replace(/\s*[—-]+\s*DELETE\s*$/, '').trim();
+}
+
+// Tabs count one level each; spaces count in pairs (Obsidian's default list indent is a
+// tab, but pasted notes often mix in 2-space indents).
+function indentLevel(ws) {
+  const tabs = (ws.match(/\t/g) || []).length;
+  const spaces = ws.replace(/\t/g, '').length;
+  return tabs + Math.floor(spaces / 2);
+}
+
+function parseTaskText(raw) {
+  const split = splitTaskMeta(raw);
+  let due = null;
+  const dm = split.meta.match(DUE_RE);
+  if (dm) due = dm[1];
+  let priority = null;
+  for (const [emoji, p] of Object.entries(PRIORITY_BY_EMOJI)) {
+    if (split.meta.includes(emoji)) { priority = p; break; }
+  }
+  let text = split.display.replace(/\s{2,}/g, ' ').trim();
+  if (!text) text = raw.trim();
+  return { text, due, priority };
+}
+
+// Builds the note's structure:
+//   groups[]    one per ## heading (the cards on the rail)
+//     items[]   tasks directly under the ## heading
+//     subgroups[] one per ###..###### heading inside it, each with items[]
+// Every task is a tree: nested checkboxes become sub-actions (type 'task') and plain
+// nested bullets become detail lines (type 'note'). Completed tasks are dropped along
+// with their notes; an open task nested under a completed one is kept and attached to
+// the nearest open ancestor so it is never silently hidden.
 async function parseNote(file) {
   const content = await getVaultFileContent(file);
   const lines = content.split(/\r?\n/);
 
   let title = file.split('/').pop().replace(/\.md$/, '');
   let inFrontmatter = false;
-  const sections = [];
-  let current = null;
+  const groups = [];
+  let group = null;   // current ## group
+  let bucket = null;  // where top-level tasks go: the group itself or its current subgroup
   const cache = {};
   let openCount = 0;
+  // List-nesting stack of { level, node, skipped }. node is a task/note, or null for a
+  // completed task (skipped) whose subtree is hidden.
+  let stack = [];
 
-  const newSection = (name) => ({ name, items: [] });
+  const newGroup = (name) => {
+    group = { name, items: [], subgroups: [] };
+    groups.push(group);
+    bucket = group;
+    stack = [];
+  };
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -203,88 +251,186 @@ async function parseNote(file) {
       continue;
     }
 
-    const heading = line.match(/^(#{1,6})\s+(.+)$/);
+    const heading = line.match(HEADING_RE);
     if (heading) {
-      if (heading[1].length === 1) continue; // keep the H1 as the note title only
-      const name = heading[2].replace(/\s*[—-]+\s*DELETE\s*$/, '').trim();
-      current = newSection(name);
-      sections.push(current);
+      const depth = heading[1].length;
+      if (depth === 1) continue; // keep the H1 as the note title only
+      const name = headingName(heading[2]);
+      if (depth === 2 || !group) {
+        newGroup(name);
+      } else {
+        bucket = { name, items: [] };
+        group.subgroups.push(bucket);
+        stack = [];
+      }
       continue;
     }
 
-    const cb = line.match(/^([\t ]*)- \[([ xX])\]\s+(.*)$/);
+    const cb = line.match(CHECKBOX_RE);
+    const bullet = cb ? null : line.match(BULLET_RE);
+    if (!cb && !bullet) {
+      // A non-indented paragraph ends the current list; blank lines and indented
+      // continuation text don't.
+      if (line.trim() !== '' && !/^[\t ]/.test(line)) stack = [];
+      continue;
+    }
+
+    const level = indentLevel((cb || bullet)[1]);
+    while (stack.length && stack[stack.length - 1].level >= level) stack.pop();
+    const parentEntry = stack.length ? stack[stack.length - 1] : null;
+
     if (cb) {
-      if (!current) { current = newSection('General'); sections.push(current); }
-      const done = cb[2] !== ' ';
-      if (done) continue; // only surface open items; closing one drops it from the list
+      if (!group) newGroup('General');
+      if (cb[2] !== ' ') { stack.push({ level, node: null, skipped: true }); continue; }
 
-      const ws = cb[1];
-      const tabs = (ws.match(/\t/g) || []).length;
-      const spaces = ws.replace(/\t/g, '').length;
-      let level = tabs + Math.floor(spaces / 2);
-      if (level > 4) level = 4;
-
-      const raw = cb[3];
-      const split = splitTaskMeta(raw);
-
-      let due = null;
-      const dm = split.meta.match(DUE_RE);
-      if (dm) due = dm[1];
-
-      let priority = null;
-      for (const [emoji, level_] of Object.entries(PRIORITY_BY_EMOJI)) {
-        if (split.meta.includes(emoji)) { priority = level_; break; }
-      }
-
-      let display = split.display.replace(/\s{2,}/g, ' ').trim();
-      if (!display) display = raw.trim();
-
+      const { text, due, priority } = parseTaskText(cb[3]);
       const id = stableId(file, i, line);
       cache[id] = { file, lineIndex: i, lineText: line };
       openCount++;
+      const node = { type: 'task', id, text, due, priority, children: [] };
 
-      current.items.push({ id, text: display, level, due, priority });
+      // Nearest open task/note ancestor; skipped (completed) ancestors are passed over.
+      let parent = null;
+      for (let s = stack.length - 1; s >= 0; s--) {
+        if (stack[s].node) { parent = stack[s].node; break; }
+      }
+      (parent ? parent.children : bucket.items).push(node);
+      stack.push({ level, node, skipped: false });
+    } else {
+      // Plain bullets only matter as details of an open task (or of another note).
+      if (!parentEntry || parentEntry.skipped || !parentEntry.node) {
+        stack.push({ level, node: null, skipped: true });
+        continue;
+      }
+      const node = { type: 'note', text: bullet[2].trim(), children: [] };
+      parentEntry.node.children.push(node);
+      stack.push({ level, node, skipped: false });
     }
   }
 
   taskCache = cache;
-  // Include all sections (even empty ones) so the widget can add tasks to them.
-  return { note: file, title, obsidianUri: obsidianUri(file), openCount, sections };
+  return {
+    note: file,
+    title,
+    obsidianUri: obsidianUri(file),
+    openCount,
+    groups,
+    // Flat list kept for widget builds older than groups/subgroups.
+    sections: legacySections(groups),
+  };
 }
 
-async function addTaskToNote(section, text, due, priority) {
+function legacySections(groups) {
+  const flatten = (items, level, out) => {
+    for (const it of items) {
+      if (it.type !== 'task') continue;
+      out.push({ id: it.id, text: it.text, level: Math.min(level, 4), due: it.due, priority: it.priority });
+      flatten(it.children, level + 1, out);
+    }
+    return out;
+  };
+  const sections = [];
+  for (const g of groups) {
+    sections.push({ name: g.name, items: flatten(g.items, 0, []) });
+    for (const sg of g.subgroups) sections.push({ name: sg.name, items: flatten(sg.items, 0, []) });
+  }
+  return sections;
+}
+
+// Finds the line range [start, end) of a heading's section. `group` names the ## heading;
+// `section` (optional) names a deeper heading inside it. For backwards compatibility a
+// lone `section` matches the first heading of that name anywhere.
+function findSectionRange(lines, group, section) {
+  const headings = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(HEADING_RE);
+    if (m && m[1].length > 1) headings.push({ i, depth: m[1].length, name: headingName(m[2]) });
+  }
+  const endOf = (h) => {
+    const next = headings.find((o) => o.i > h.i && o.depth <= h.depth);
+    return next ? next.i : lines.length;
+  };
+  let target;
+  if (group) {
+    const g = headings.find((h) => h.name === group);
+    if (!g) throw new Error(`Group "${group}" not found in the note.`);
+    target = g;
+    if (section) {
+      const gEnd = endOf(g);
+      target = headings.find((h) => h.i > g.i && h.i < gEnd && h.depth > g.depth && h.name === section);
+      if (!target) throw new Error(`Section "${section}" not found under "${group}".`);
+    }
+  } else {
+    target = headings.find((h) => h.name === section);
+    if (!target) throw new Error(`Section "${section}" not found in the note.`);
+  }
+  // A new top-level task belongs before the first sub-heading, not inside it.
+  const sub = headings.find((h) => h.i > target.i);
+  const end = sub && sub.i < endOf(target) ? sub.i : endOf(target);
+  return { start: target.i, end };
+}
+
+function formatTaskLine(indent, text, due, priority) {
+  let line = `${indent}- [ ] ${text}`;
+  if (priority && EMOJI_BY_PRIORITY[priority]) line += ` ${EMOJI_BY_PRIORITY[priority]}`;
+  if (due) line += ` 📅 ${due}`;
+  return line;
+}
+
+// Last line of the list item at `index` (its own line plus everything indented under it).
+function subtreeEnd(lines, index) {
+  const own = indentLevel(lines[index].match(/^[\t ]*/)[0]);
+  let last = index;
+  for (let i = index + 1; i < lines.length; i++) {
+    if (lines[i].trim() === '') continue;
+    if (HEADING_RE.test(lines[i]) || indentLevel(lines[i].match(/^[\t ]*/)[0]) <= own) break;
+    last = i;
+  }
+  return last;
+}
+
+async function addTaskToNote({ group, section, parentId, text, due, priority }) {
+  if (parentId) return addSubTask(parentId, text, due, priority);
+
   const file = await findActiveNote();
   const content = await getVaultFileContent(file);
   const eol = content.includes('\r\n') ? '\r\n' : '\n';
   const lines = content.split(/\r?\n/);
+  const { start, end } = findSectionRange(lines, group, section);
 
-  let sectionLine = -1;
-  for (let i = 0; i < lines.length; i++) {
-    const m = lines[i].match(/^(#{1,6})\s+(.+)$/);
-    if (m) {
-      const name = m[2].replace(/\s*[—-]+\s*DELETE\s*$/, '').trim();
-      if (name === section) { sectionLine = i; break; }
-    }
-  }
-  if (sectionLine === -1) throw new Error(`Section "${section}" not found in the note.`);
-
-  let nextSection = lines.length;
-  for (let i = sectionLine + 1; i < lines.length; i++) {
-    if (/^#{1,6}\s/.test(lines[i])) { nextSection = i; break; }
+  // Insert after the last list/text line in the section (or right after the heading).
+  // Horizontal rules (---) separating sections are skipped so tasks never land below them.
+  let insertAfter = start;
+  for (let i = start + 1; i < end; i++) {
+    if (lines[i].trim() !== '' && !RULE_RE.test(lines[i])) insertAfter = i;
   }
 
-  // Insert after the last non-blank line inside the section (or right after the heading).
-  let insertAfter = sectionLine;
-  for (let i = sectionLine + 1; i < nextSection; i++) {
-    if (lines[i].trim() !== '') insertAfter = i;
-  }
-
-  let taskLine = `- [ ] ${text}`;
-  if (priority && EMOJI_BY_PRIORITY[priority]) taskLine += ` ${EMOJI_BY_PRIORITY[priority]}`;
-  if (due) taskLine += ` 📅 ${due}`;
-
-  lines.splice(insertAfter + 1, 0, taskLine);
+  lines.splice(insertAfter + 1, 0, formatTaskLine('', text, due, priority));
   await setVaultFileContent(file, lines.join(eol));
+  taskCache = {};
+}
+
+async function addSubTask(parentId, text, due, priority) {
+  const entry = taskCache[parentId];
+  if (!entry) throw new Error('Unknown task id (list may be stale) — refresh and try again.');
+  const content = await getVaultFileContent(entry.file);
+  const eol = content.includes('\r\n') ? '\r\n' : '\n';
+  const lines = content.split(/\r?\n/);
+  if (entry.lineIndex >= lines.length || lines[entry.lineIndex] !== entry.lineText) {
+    throw new Error('Note changed since last refresh — refresh and try again.');
+  }
+
+  const parentWs = lines[entry.lineIndex].match(/^[\t ]*/)[0];
+  const last = subtreeEnd(lines, entry.lineIndex);
+  // Match the indent style of an existing child when there is one; default to a tab.
+  let childWs = parentWs + '\t';
+  if (last > entry.lineIndex) {
+    const firstChild = lines.slice(entry.lineIndex + 1, last + 1).find((l) => l.trim() !== '');
+    childWs = firstChild.match(/^[\t ]*/)[0];
+  }
+
+  lines.splice(last + 1, 0, formatTaskLine(childWs, text, due, priority));
+  await setVaultFileContent(entry.file, lines.join(eol));
   taskCache = {};
 }
 
@@ -346,6 +492,15 @@ async function setTaskDone(id, done) {
 
   const rebuilt = m[1] + (done ? 'x' : ' ') + m[2];
   lines[entry.lineIndex] = rebuilt;
+
+  // Closing a parent action closes its open sub-actions too, so they don't resurface
+  // as orphans on the next refresh. Detail bullets are left untouched.
+  if (done) {
+    const last = subtreeEnd(lines, entry.lineIndex);
+    for (let i = entry.lineIndex + 1; i <= last; i++) {
+      lines[i] = lines[i].replace(/^([\t ]*[-*+] \[) (\]\s)/, '$1x$2');
+    }
+  }
 
   await setVaultFileContent(entry.file, lines.join(eol));
   taskCache[id] = { file: entry.file, lineIndex: entry.lineIndex, lineText: rebuilt };
@@ -462,8 +617,17 @@ const server = http.createServer(async (req, res) => {
     if (route === 'POST /api/tasks/add') {
       try {
         const body = JSON.parse(await readBody(req));
-        if (!body.section || !body.text) throw new Error('section and text are required.');
-        await addTaskToNote(body.section.trim(), body.text.trim(), body.due || null, body.priority || null);
+        if (!body.text || !(body.section || body.group || body.parentId)) {
+          throw new Error('text and one of group, section or parentId are required.');
+        }
+        await addTaskToNote({
+          group: body.group ? String(body.group).trim() : null,
+          section: body.section ? String(body.section).trim() : null,
+          parentId: body.parentId || null,
+          text: String(body.text).trim(),
+          due: body.due || null,
+          priority: body.priority || null,
+        });
         return sendJson(res, 200, { ok: true });
       } catch (e) {
         return sendJson(res, 400, { error: e.message });

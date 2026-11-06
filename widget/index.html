@@ -22,6 +22,12 @@
         </div>
         <div class="bar-right">
             <span id="updated-at" class="updated">--:--:--</span>
+            <button id="expand-all-btn" class="icon-btn hidden" title="Expand all actions" aria-label="Expand or collapse all actions">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path class="ea-open" d="M7 8l5 5 5-5M7 13l5 5 5-5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path class="ea-close" d="M7 16l5-5 5 5M7 11l5-5 5 5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </button>
             <button id="add-section-btn" class="text-btn" title="Add new section" aria-label="Add new section">+ Section</button>
             <div class="hidden-groups-wrap">
                 <button id="hidden-groups-btn" class="icon-btn hidden" title="Hidden sections" aria-label="Hidden sections">
@@ -84,6 +90,25 @@
         </article>
     </template>
 
+    <template id="subgroup-template">
+        <section class="subgroup">
+            <div class="subgroup-head">
+                <button class="subgroup-toggle" aria-label="Expand or collapse subgroup">
+                    <svg class="chev" viewBox="0 0 24 24" width="18" height="18" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    <span class="subgroup-name"></span>
+                    <span class="subgroup-count"></span>
+                </button>
+                <button class="add-task-btn" title="Add task here" aria-label="Add task here">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+                    </svg>
+                </button>
+            </div>
+        </section>
+    </template>
+
     <template id="item-template">
         <div class="item">
             <button class="check-btn" title="Close out" aria-label="Close out">
@@ -91,8 +116,18 @@
                     <path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
             </button>
-            <span class="item-text"></span>
-            <span class="due-pill hidden"></span>
+            <div class="item-main">
+                <span class="item-text"></span>
+                <div class="item-meta hidden">
+                    <span class="due-pill hidden"></span>
+                    <span class="item-summary hidden"></span>
+                </div>
+            </div>
+            <button class="expand-btn hidden" title="Show sub-actions and notes" aria-label="Show sub-actions and notes">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </button>
         </div>
     </template>
 
@@ -124,6 +159,7 @@
                 </div>
             </div>
             <div class="modal-actions">
+                <button id="task-subaction-btn" class="modal-btn modal-btn-secondary hidden">+ Sub-action</button>
                 <button id="task-cancel-btn" class="modal-btn modal-btn-cancel">Cancel</button>
                 <button id="task-submit-btn" class="modal-btn modal-btn-confirm">Add Task</button>
             </div>
